@@ -278,14 +278,17 @@ class ActorCritic_Hybrid(nn.Module):
                  action_dis_dim, action_dis_len, action_con_dim,
                  mid_dim,
                  init_log_std,
+                 action_con_low,  # 新增参数：连续动作的实际下限（如 [0, 0]）
+                 action_con_high,  # 新增参数：连续动作的实际上限（如 [360, 30]）
                  ):
         super().__init__()
 
         self.action_dis_dim = action_dis_dim
         self.action_dis_len = action_dis_len
         self.action_con_dim = action_con_dim
-
         self.log_std = nn.Parameter(torch.zeros(action_con_dim, ) + init_log_std, requires_grad=True)
+        self.action_con_low = torch.tensor(action_con_low, dtype=torch.float32)
+        self.action_con_high = torch.tensor(action_con_high, dtype=torch.float32)
 
         # Critic network
         self.critic = nn.Sequential(
@@ -330,11 +333,20 @@ class ActorCritic_Hybrid(nn.Module):
         action_dis = dist_dis.sample()
         logprob_dis = dist_dis.log_prob(action_dis)
 
+        # 连续动作部分：生成 [-1, 1] 的归一化动作
         mean = torch.nan_to_num(self.actor_con(state), nan=1e-6)
         std = torch.clamp(F.softplus(self.log_std), min=0.01, max=0.6)
-        dist_con = Normal(mean, std)
-        action_con = dist_con.sample()
-        logprob_con = dist_con.log_prob(action_con)
+        dist_con_normalized = Normal(mean, std)
+        action_con_normalized = torch.tanh(dist_con_normalized.rsample())  # 限制到 [-1, 1]
+
+        # 映射到实际物理范围
+        action_con = self.action_con_low + (action_con_normalized + 1) * (
+                    self.action_con_high - self.action_con_low) / 2
+
+        # 计算对数概率（需修正缩放因子）
+        logprob_con_raw = dist_con_normalized.log_prob(action_con_normalized)
+        jacobian = torch.log((self.action_con_high - self.action_con_low) / 2 + 1e-6)  # 缩放因子的雅可比行列式
+        logprob_con = logprob_con_raw - jacobian - torch.log(1 - action_con_normalized.pow(2) + 1e-6)
 
         return state_value, action_dis, action_con, logprob_dis, logprob_con
 
@@ -350,13 +362,21 @@ class ActorCritic_Hybrid(nn.Module):
         dist_entropy_dis = dist_dis.entropy()
 
         # Continuous actions
+        # 将物理动作反归一化到 [-1, 1]
+        action_con_normalized = 2 * (action_con - self.action_con_low) / (
+                    self.action_con_high - self.action_con_low) - 1
+
+        # 计算对数概率（反向推导）
         mean = torch.nan_to_num(self.actor_con(state), nan=1e-6)
         std = torch.clamp(F.softplus(self.log_std), min=0.01, max=0.6)
-        dist_con = Normal(mean, std)
+        dist_con_normalized = Normal(mean, std)
+        logprob_con_raw = dist_con_normalized.log_prob(action_con_normalized)
+        jacobian = torch.log((self.action_con_high - self.action_con_low) / 2 + 1e-6)
+        logprobs_con = logprob_con_raw - jacobian - torch.log(1 - action_con_normalized.pow(2) + 1e-6)
 
         # logp_con should capture log probabilities for each choice in action_dis
-        logprobs_con = dist_con.log_prob(action_con)  # Shape: [batch_size, action_dim]
-        dist_entropy_con = dist_con.entropy()
+        # 连续动作的熵计算（修正变量名）
+        dist_entropy_con = dist_con_normalized.entropy()
 
         return logprobs_dis, logprobs_con, dist_entropy_dis, dist_entropy_con
 
@@ -583,13 +603,13 @@ class PPO_Hybrid(PPO_Abstract, ABC):
     def __init__(self, state_dim, action_dis_dim, action_dis_len, action_con_dim, mid_dim, lr_actor, lr_critic,
                  lr_decay_rate, buffer_size, target_kl_dis, target_kl_con,
                  gamma, lam, epochs_update, v_iters, eps_clip, max_norm, coeff_entropy, random_seed, device,
-                 lr_std, init_log_std):
+                 lr_std, init_log_std,action_con_low,  action_con_high):
         super().__init__(state_dim, action_dis_dim, action_dis_len, action_con_dim, mid_dim, lr_actor, lr_critic,
                          lr_decay_rate, buffer_size, target_kl_dis, target_kl_con,
                          gamma, lam, epochs_update, v_iters, eps_clip, max_norm, coeff_entropy, random_seed, device)
 
         self.agent = ActorCritic_Hybrid(state_dim, action_dis_dim, action_dis_len, action_con_dim, mid_dim,
-                                        init_log_std).to(device)
+                                        init_log_std, action_con_low, action_con_high,).to(device)
         self.agent.apply(weight_init)
         self.agent_old = ActorCritic_Hybrid(state_dim, action_dis_dim, action_dis_len, action_con_dim, mid_dim,
                                             init_log_std).to(device)

@@ -40,6 +40,8 @@ class Trainer(object):
         self.max_norm_grad = args.max_norm_grad
         self.init_log_std = args.init_log_std
         self.coeff_dist_entropy = args.coeff_dist_entropy
+        self.action_con_low = np.array([0, 0])
+        self.action_con_high = np.array([360, 30])
         self.random_seed = args.random_seed
         #self.if_use_active_selection = args.if_use_active_selection
 
@@ -117,6 +119,8 @@ class Trainer(object):
                           self.device,
                           self.lr_std,
                           self.init_log_std,
+                          self.action_con_low,
+                          self.action_con_high,
                           # self.if_use_active_selection
                           )
 
