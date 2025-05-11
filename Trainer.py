@@ -52,7 +52,8 @@ class Trainer(object):
 
         self.env = sensornet()
         self.obs_dim = self.env.observation_space.shape[0]
-        self.action_dis_dim = self.env.action_space[0].n  # Discrete 动作维度
+        self.action_dis_dim = 1
+        #self.action_dis_dim = self.env.action_space[0].n  # Discrete 动作维度
         self.action_dis_len = self.env.action_dis_len
         self.action_con_dim = self.env.action_space[1].shape[0]  # Box 动作维度
 
@@ -83,10 +84,17 @@ class Trainer(object):
         actions = value_action_logp[1]
         logp_actions = value_action_logp[2]
 
+        # 假设 actions 和 logp_actions 是元组或数组，分别包含离散和连续动作
+        act_dis = actions[0]  # 离散动作
+        act_con = actions[1]  # 连续动作
+        logp_dis = logp_actions[0]  # 离散动作的对数概率
+        logp_con = logp_actions[1]  # 连续动作的对数概率
+
+        return state_value, act_dis, act_con, logp_dis, logp_con
         # actions = np.array([action_dis, action_con])
         # logp_actions = np.array([log_prob_dis, log_prob_con])
 
-        return state_value, actions, logp_actions
+        #return state_value, actions, logp_actions
 
     def initialize_agents(self, random_seed):
         """
@@ -152,13 +160,24 @@ class Trainer(object):
                     observations_norm = (state - norm_mean) / np.maximum(norm_std, 1e-6)
                     # Select action with policy
                     value_action_logp = agent.select_action(observations_norm)
-                    values, actions, logp_actions = self.unbatchify(value_action_logp)
+                    #values, action_dis, action_con,log_prob_dis,log_prob_con= self.unbatchify(value_action_logp)
 
+                    actions = value_action_logp[1]
                     next_state, reward, done, info = self.env.step(actions)
+                    action_dis = actions[0]
+                    action_con = actions[1]
+                    values = value_action_logp[0]
+                    log_prob_dis = value_action_logp[2][0]
+                    log_prob_con = value_action_logp[2][1]
 
-                    self.push_history_dis(state, actions, logp_actions, values)
-                    agent.buffer.store_dis(self.history['obs'], self.history['act_dis'],
-                                           reward, self.history['val'], self.history['logp_act_dis'])
+                    self.push_history_hybrid(state, action_dis, action_con, log_prob_dis, log_prob_con, values)
+                    agent.buffer.store_hybrid(self.history['obs'],
+                                              self.history['act_dis'],
+                                              self.history['act_con'],
+                                              reward,
+                                              self.history['val'],
+                                              self.history['logp_act_dis'],
+                                              self.history['logp_act_con'])
 
                     total_reward += reward
 
@@ -201,9 +220,11 @@ class Trainer(object):
                                     distance_errors[i],  # y 坐标
                                     i_episode
                                 )
+                        break
+
                     i_episode += 1
                     agent.buffer.finish_path(0)
-                    break
+
                 print(f"Episode {i_episode} - Total Reward: {total_reward}")
                 self.writer.add_scalar('Reward/Total', total_reward, i_episode)
 

@@ -38,7 +38,7 @@ class sensornet(gym.Env):
         self.los_distance = 250  # 视距传输概率为0.5时的水平距离是250m
         self.gdop_heatmap_size = 100  # GDOP热力图分辨率
         self.gdop_feature_dim = 128  # GDOP热力图特征维度
-        self.radius_stable_step = 0
+        self.radius_stable = 0
         self.simulation_steps = 2500
         self.action_dis_len = 2
         # action:离散动作：0：单通信；1：单感知；
@@ -89,8 +89,8 @@ class sensornet(gym.Env):
             for i in range(self.sensor_num)
         ])
         # 生成初始测距轨迹点
-        self.measurement_points = []
-        self.measurements = []
+        self.measurement_points = np.empty((0, 2))  # 初始化为空的二维数组
+        self.measurements = np.empty((0, self.sensor_num))  # 初始化为二维数组 [0行, 5列]
 
         # 重置无人机位置
         self.uav_position = np.array([0, 0])
@@ -259,15 +259,18 @@ class sensornet(gym.Env):
             variances = self.g0 * true_distances ** 2
             # 生成高斯分布的测距值
             measurements = np.random.normal(true_distances, np.sqrt(variances))
+            measurements = measurements.reshape(1, -1)  # 转换为二维行向量 [1行, 5列]
             self.measurements = np.vstack([self.measurements, measurements])
             # 计算GDOP热力图
             self.gdop_heatmap = gdop_heatmap(self.sensor_estimated_positions, self.measurement_points, self.region_size,
                                              self.gdop_heatmap_size)
         elif discrete_action == 0:  # 进行通信
             # 计算无人机与每个传感器之间的估计最远距离
-            distances = np.linalg.norm(
-                self.uav_position - self.sensor_estimated_positions + self.sensor_estimated_radii,
-                axis=1)
+            center_distances = np.linalg.norm(
+                self.uav_position - self.sensor_estimated_positions,  # 先计算中心距离
+                axis=1
+            )
+            distances = center_distances + self.sensor_estimated_radii  # 叠加估计半径
             # 判断传感器的最远距离是否在通信范围以及在通信范围内的传感器 data_collection_finished 是否为 0
             within_communication_range = distances <= self.los_distance
             can_collect_data = ~self.data_collection_finished

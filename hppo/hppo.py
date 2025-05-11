@@ -280,6 +280,7 @@ class ActorCritic_Hybrid(nn.Module):
                  init_log_std,
                  action_con_low,  # 新增参数：连续动作的实际下限（如 [0, 0]）
                  action_con_high,  # 新增参数：连续动作的实际上限（如 [360, 30]）
+                 device='cuda'
                  ):
         super().__init__()
 
@@ -287,8 +288,8 @@ class ActorCritic_Hybrid(nn.Module):
         self.action_dis_len = action_dis_len
         self.action_con_dim = action_con_dim
         self.log_std = nn.Parameter(torch.zeros(action_con_dim, ) + init_log_std, requires_grad=True)
-        self.action_con_low = torch.tensor(action_con_low, dtype=torch.float32)
-        self.action_con_high = torch.tensor(action_con_high, dtype=torch.float32)
+        self.action_con_low = torch.tensor(action_con_low, dtype=torch.float32, device=device)
+        self.action_con_high = torch.tensor(action_con_high, dtype=torch.float32, device=device)
 
         # Critic network
         self.critic = nn.Sequential(
@@ -609,10 +610,10 @@ class PPO_Hybrid(PPO_Abstract, ABC):
                          gamma, lam, epochs_update, v_iters, eps_clip, max_norm, coeff_entropy, random_seed, device)
 
         self.agent = ActorCritic_Hybrid(state_dim, action_dis_dim, action_dis_len, action_con_dim, mid_dim,
-                                        init_log_std, action_con_low, action_con_high,).to(device)
+                                        init_log_std, action_con_low, action_con_high,device=self.device ).to(device)
         self.agent.apply(weight_init)
         self.agent_old = ActorCritic_Hybrid(state_dim, action_dis_dim, action_dis_len, action_con_dim, mid_dim,
-                                            init_log_std).to(device)
+                                            init_log_std, action_con_low, action_con_high,device=self.device ).to(device)
         self.agent_old.load_state_dict(self.agent.state_dict())
 
         self.optimizer_actor_con = torch.optim.Adam([
