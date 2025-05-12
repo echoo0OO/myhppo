@@ -2,9 +2,9 @@
 
 ## 1 introduction
 
-Hybrid Proximal Policy Optimization (HPPO) for WetEnv
+Hybrid Proximal Policy Optimization (HPPO) for WetEnvWetEnv的混合近端策略优化（HPPO）
 
-This project implements a Hybrid Proximal Policy Optimization (HPPO) algorithm for reinforcement learning in a custom environment called WetEnv. The HPPO algorithm is designed to handle both discrete and continuous action spaces.
+
 
 ## 2 env & model
 
